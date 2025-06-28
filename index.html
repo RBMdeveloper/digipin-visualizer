@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8" />
+    <title>DIGIPIN Visualizer</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css"/>
+    <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+
+    <style>
+        body { margin: 0; font-family: sans-serif; }
+        #controls {
+            padding: 10px;
+            background: #f4f4f4;
+            border-bottom: 1px solid #ccc;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            align-items: center;
+        }
+        #controls input, #controls button {
+            padding: 6px 10px;
+            font-size: 14px;
+        }
+        #map { height: calc(100vh - 60px); }
+
+        .grid-label {
+            font-size: 10px;
+            font-weight: bold;
+            color: #003366;
+        }
+
+        #about {
+      background: #f2f2f2;
+      padding: 20px;
+      font-size: 15px;
+      line-height: 1.6;
+    }
+
+    #about img {
+      height: 80px;
+      float: right;
+      margin-left: 20px;
+    }
+
+    #controls {
+      padding: 10px;
+      background: #f9f9f9;
+      border-bottom: 1px solid #ccc;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      align-items: center;
+    }
+
+    #controls input, #controls button {
+      padding: 6px 10px;
+      font-size: 14px;
+    }
+
+    </style>
+</head>
+<body>
+
+    <section id="about">
+  <img src="https://upload.wikimedia.org/wikipedia/en/thumb/4/4e/India_Post_Logo.svg/1280px-India_Post_Logo.svg.png" alt="India Post Logo">
+
+  <h2>What is DIGIPIN?</h2>
+  <p><strong>DIGIPIN</strong> (Digital PIN) is a grid-based geospatial location code system developed by the Department of Telecommunications and India Post to replace traditional postal PIN codes with accurate, digital geographic references.</p>
+
+  <p>The system divides the Indian subcontinent into hierarchical grid tiles using a 4x4 matrix at each level. Each tile is assigned a unique alphanumeric code. At deeper zoom levels, locations can be pinpointed to within 10 meters accuracy or better.</p>
+
+  <p>This tool is a fully interactive visualizer for exploring and converting DIGIPIN codes into GPS coordinates (latitude/longitude) and vice versa. It also allows you to click on any tile and get its data instantly.</p>
+
+  <p><strong>Developed by:</strong> Raja GeoDev | <a href="https://rajageodev.com/digipin" target="_blank">rajageodev.com</a></p>
+</section>
+
+<div id="controls">
+    <input type="text" id="digipinInput" placeholder="Enter DIGIPIN (e.g. FJ4M)">
+    <button onclick="goToDigipin()">Go to DIGIPIN</button>
+
+    <input type="text" id="latlngInput" placeholder="Enter Lat,Lon (e.g. 23.5,80.2)">
+    <button onclick="goToLatLng()">Go to Lat/Lng</button>
+
+    <input type="text" id="resultInfo" readonly style="flex: 1; background: #fff; border: 1px solid #ccc;">
+</div>
+
+<div id="map"></div>
+
+<script>
+const LGRID = [
+    ['F', 'C', '9', '8'],
+    ['J', '3', '2', '7'],
+    ['K', '4', '5', '6'],
+    ['L', 'M', 'P', 'T']
+];
+
+const BASE_BBOX = {
+    minLat: 2.5, maxLat: 38.5,
+    minLon: 63.5, maxLon: 99.5
+};
+
+function getDigipinLevel(zoom) {
+    return Math.max(1, Math.min(10, zoom - 5));
+}
+
+function findGridIndex(char) {
+    for (let r = 0; r < 4; r++) {
+        for (let c = 0; c < 4; c++) {
+            if (LGRID[r][c] === char) return [r, c];
+        }
+    }
+    return null;
+}
+
+function getPrefixForLatLon(lat, lon, level) {
+    let minLat = BASE_BBOX.minLat, maxLat = BASE_BBOX.maxLat;
+    let minLon = BASE_BBOX.minLon, maxLon = BASE_BBOX.maxLon;
+    let prefix = '';
+
+    for (let i = 0; i < level; i++) {
+        const latStep = (maxLat - minLat) / 4;
+        const lonStep = (maxLon - minLon) / 4;
+
+        let row = Math.floor((maxLat - lat) / latStep);
+        let col = Math.floor((lon - minLon) / lonStep);
+
+        row = Math.max(0, Math.min(3, row));
+        col = Math.max(0, Math.min(3, col));
+
+        prefix += LGRID[row][col];
+
+        maxLat = maxLat - latStep * row;
+        minLat = maxLat - latStep;
+
+        minLon = minLon + lonStep * col;
+        maxLon = minLon + lonStep;
+    }
+
+    return prefix;
+}
+
+function getCellBounds(prefix) {
+    let minLat = BASE_BBOX.minLat, maxLat = BASE_BBOX.maxLat;
+    let minLon = BASE_BBOX.minLon, maxLon = BASE_BBOX.maxLon;
+
+    for (let char of prefix) {
+        const index = findGridIndex(char);
+        if (!index) break;
+
+        const [row, col] = index;
+        const latStep = (maxLat - minLat) / 4;
+        const lonStep = (maxLon - minLon) / 4;
+
+        maxLat = maxLat - latStep * row;
+        minLat = maxLat - latStep;
+
+        minLon = minLon + lonStep * col;
+        maxLon = minLon + lonStep;
+    }
+
+    return [[minLat, minLon], [maxLat, maxLon]];
+}
+
+function generateSubPrefixes(prefix) {
+    const subs = [];
+    for (let r = 0; r < 4; r++) {
+        for (let c = 0; c < 4; c++) {
+            subs.push(prefix + LGRID[r][c]);
+        }
+    }
+    return subs;
+}
+
+
+const map = L.map('map').setView([23.5, 80.5], 6);
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    maxZoom: 22
+}).addTo(map);
+
+const gridLayerGroup = L.layerGroup().addTo(map);
+
+function drawCentered16Grids() {
+    gridLayerGroup.clearLayers();
+
+    const zoom = map.getZoom();
+    const level = getDigipinLevel(zoom);
+    const center = map.getCenter();
+    const centerPrefix = getPrefixForLatLon(center.lat, center.lng, level);
+    const parentPrefix = centerPrefix.slice(0, -1);
+
+    const visiblePrefixes = generateSubPrefixes(parentPrefix);
+
+    visiblePrefixes.forEach(prefix => {
+        const bounds = getCellBounds(prefix);
+        const latLngBounds = L.latLngBounds(bounds);
+        const rect = L.rectangle(latLngBounds, {
+            color: '#0033cc',
+            weight: 0.5,
+            fillOpacity: 0.05
+        }).addTo(gridLayerGroup);
+
+        const label = L.marker(latLngBounds.getCenter(), {
+            icon: L.divIcon({
+                className: 'grid-label',
+                html: prefix,
+                iconSize: [80, 12],
+                iconAnchor: [40, 6]
+            })
+        }).addTo(gridLayerGroup);
+
+        rect.on('click', () => {
+            const lat = latLngBounds.getCenter().lat.toFixed(6);
+            const lon = latLngBounds.getCenter().lng.toFixed(6);
+            document.getElementById('digipinInput').value = prefix;
+            document.getElementById('latlngInput').value = `${lat}, ${lon}`;
+            document.getElementById('resultInfo').value = `Clicked: ${prefix} → [${lat}, ${lon}]`;
+            map.fitBounds(latLngBounds);
+        });
+    });
+}
+
+
+function goToDigipin() {
+    const pin = document.getElementById('digipinInput').value.trim().toUpperCase();
+    if (!pin) return;
+
+    const bounds = getCellBounds(pin);
+    const latLngBounds = L.latLngBounds(bounds);
+    map.fitBounds(latLngBounds);
+    document.getElementById('resultInfo').value = `${pin} bounds: ${bounds[0][0].toFixed(4)},${bounds[0][1].toFixed(4)} to ${bounds[1][0].toFixed(4)},${bounds[1][1].toFixed(4)}`;
+}
+
+function goToLatLng() {
+    const input = document.getElementById('latlngInput').value.trim();
+    const [latStr, lonStr] = input.split(',');
+    if (!latStr || !lonStr) return;
+
+    const lat = parseFloat(latStr);
+    const lon = parseFloat(lonStr);
+    if (isNaN(lat) || isNaN(lon)) return;
+
+    const level = getDigipinLevel(map.getZoom());
+    const pin = getPrefixForLatLon(lat, lon, level);
+    const bounds = getCellBounds(pin);
+
+    map.fitBounds(L.latLngBounds(bounds));
+    document.getElementById('digipinInput').value = pin;
+    document.getElementById('resultInfo').value = `LatLng: ${lat}, ${lon} → DIGIPIN: ${pin}`;
+}
+
+map.on('zoomend moveend', drawCentered16Grids);
+drawCentered16Grids();
+</script>
+
+</body>
+</html>
