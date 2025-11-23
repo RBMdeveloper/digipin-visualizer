@@ -2,7 +2,7 @@
 
 An interactive visual tool for exploring the [DIGIPIN](https://dot.gov.in/) (Digital PIN Code) system by India Post and the Department of Telecommunications, Government of India.
 
-### 🔍 Features
+### 🔍 Feature
 
 - Visualize DIGIPIN grid tiles on a map
 - Convert DIGIPIN ↔️ Latitude/Longitude
